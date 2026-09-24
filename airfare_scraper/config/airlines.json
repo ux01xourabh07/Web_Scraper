@@ -1,0 +1,32 @@
+{
+    "6E": {
+        "name": "IndiGo",
+        "iata_code": "6E",
+        "active": true
+    },
+    "AI": {
+        "name": "Air India",
+        "iata_code": "AI",
+        "active": true
+    },
+    "UK": {
+        "name": "Vistara",
+        "iata_code": "UK",
+        "active": true
+    },
+    "SG": {
+        "name": "SpiceJet",
+        "iata_code": "SG",
+        "active": true
+    },
+    "I5": {
+        "name": "AIX Connect",
+        "iata_code": "I5",
+        "active": true
+    },
+    "QP": {
+        "name": "Akasa Air",
+        "iata_code": "QP",
+        "active": true
+    }
+}

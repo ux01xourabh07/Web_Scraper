@@ -1,0 +1,38 @@
+{
+    "DEL": {
+        "airport_code": "DEL",
+        "airport_name": "Indira Gandhi International Airport",
+        "city": "Delhi",
+        "state": "Delhi"
+    },
+    "BOM": {
+        "airport_code": "BOM",
+        "airport_name": "Chhatrapati Shivaji Maharaj International Airport",
+        "city": "Mumbai",
+        "state": "Maharashtra"
+    },
+    "BLR": {
+        "airport_code": "BLR",
+        "airport_name": "Kempegowda International Airport",
+        "city": "Bengaluru",
+        "state": "Karnataka"
+    },
+    "HYD": {
+        "airport_code": "HYD",
+        "airport_name": "Rajiv Gandhi International Airport",
+        "city": "Hyderabad",
+        "state": "Telangana"
+    },
+    "MAA": {
+        "airport_code": "MAA",
+        "airport_name": "Chennai International Airport",
+        "city": "Chennai",
+        "state": "Tamil Nadu"
+    },
+    "CCU": {
+        "airport_code": "CCU",
+        "airport_name": "Netaji Subhas Chandra Bose International Airport",
+        "city": "Kolkata",
+        "state": "West Bengal"
+    }
+}

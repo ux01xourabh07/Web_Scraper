@@ -1,0 +1,17 @@
+[
+    {
+        "origin": "DEL",
+        "destination": "BOM",
+        "active": true
+    },
+    {
+        "origin": "BOM",
+        "destination": "BLR",
+        "active": true
+    },
+    {
+        "origin": "DEL",
+        "destination": "BLR",
+        "active": true
+    }
+]
