@@ -9,8 +9,13 @@ venv.bak/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *$py.class
+
+# Logs
+logs/
+*.log
 
 # IDEs and Editors
 .vscode/

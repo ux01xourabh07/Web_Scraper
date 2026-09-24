@@ -1,130 +1,164 @@
-import schedule
-import time
-import json
 import os
+import json
+import time
 from datetime import datetime
-from database import get_db_connection
-from scrapers.mock_scraper import MockScraper
-from processors.normalizer import FareNormalizer
-from processors.validator import DataValidator
-from processors.deduplicator import DuplicateDetector
+import schedule
+
+from database.connection import DatabaseConnection
+from database.models import DataRepository
+from pipeline.deduplicator import DuplicateDetector
+from utils.logger import log_scrape_success, log_scrape_failure
+
+# Import all source connectors
+from scrapers.base_scraper import SourceUnavailableError
+from scrapers.google_flights import GoogleFlightsScraper
+from scrapers.skyscanner import SkyscannerScraper
+from scrapers.kayak import KayakScraper
+from scrapers.expedia import ExpediaScraper
+from scrapers.momondo import MomondoScraper
+from scrapers.hopper import HopperScraper
+from scrapers.booking import BookingFlightsScraper
+from scrapers.cheapoair import CheapOairScraper
+from scrapers.cleartrip import CleartripScraper
+from scrapers.makemytrip import MakeMyTripScraper
 
 class AirfareScheduler:
-    """
-    Manages the automated execution of the scraping pipeline based on configured routes.
-    """
-    
     def __init__(self, interval_minutes=30):
-        self.interval_minutes = interval_minutes
+        self.interval_minutes = int(os.getenv("SCRAPE_INTERVAL_MINUTES", interval_minutes))
         self.routes_file = os.path.join(os.path.dirname(__file__), '..', 'config', 'routes.json')
-        
+        self.db = DatabaseConnection()
+        self.repo = DataRepository(self.db)
+        self.deduplicator = None
+
+        self.sources = [
+            GoogleFlightsScraper(),
+            SkyscannerScraper(),
+            KayakScraper(),
+            ExpediaScraper(),
+            MomondoScraper(),
+            HopperScraper(),
+            BookingFlightsScraper(),
+            CheapOairScraper(),
+            CleartripScraper(),
+            MakeMyTripScraper()
+        ]
+
     def load_active_routes(self):
         try:
             with open(self.routes_file, 'r') as f:
                 routes = json.load(f)
                 return [r for r in routes if r.get('active', False)]
-        except Exception as e:
-            print(f"Error loading routes: {e}")
-            return []
+        except Exception:
+            return [{"origin": "DEL", "destination": "BOM", "active": True}]
 
-    def run_pipeline(self):
-        print(f"\n--- Starting Scrape Pipeline at {datetime.now()} ---")
+    def run_cycle(self):
+        print("\nStarting scraping cycle...")
+        started_at = datetime.now()
         
+        conn = self.db.get_connection()
+        if not conn:
+            print("Database connection failed. Skipping cycle.")
+            return
+
+        self.deduplicator = DuplicateDetector(conn)
         routes = self.load_active_routes()
-        if not routes:
-            print("No active routes found. Exiting pipeline.")
-            return
+        target_date = "2026-10-15"
 
-        db_conn = get_db_connection()
-        if not db_conn:
-            print("Database connection failed. Cannot proceed.")
-            return
+        total_collected = 0
+        total_validated = 0
+        total_rejected = 0
+        total_inserted = 0
 
-        # Initialize components
-        scrapers = [MockScraper()] # Add real scrapers here later
-        deduplicator = DuplicateDetector(db_conn)
-        cursor = db_conn.cursor()
+        for scraper in self.sources:
+            source_name = scraper.source_name
+            source_start = datetime.now()
+            source_records = []
+            status = "SUCCESS"
+            err_msg = None
 
-        # Set target date (e.g., 10 days from now)
-        # In a real system, you'd iterate over multiple future dates
-        target_date = "2026-10-10"
-        scrape_timestamp = datetime.now()
+            try:
+                for route in routes:
+                    raw_data = scraper.scrape(route, target_date)
+                    source_records.extend(raw_data)
 
-        for route in routes:
-            origin = route["origin"]
-            dest = route["destination"]
-            
-            for scraper in scrapers:
-                try:
-                    # 1. Scrape Raw Data
-                    raw_observations = scraper.search_fares(origin, dest, target_date)
-                    
-                    saved_count = 0
-                    duplicate_count = 0
-                    invalid_count = 0
-                    
-                    for raw_obs in raw_observations:
-                        # 2. Add timestamp
-                        raw_obs["scraped_at"] = scrape_timestamp
-                        
-                        # Calculate lead time
-                        departure = datetime.strptime(raw_obs["departure_date"], "%Y-%m-%d")
-                        raw_obs["lead_time_days"] = (departure - scrape_timestamp).days
-                        
-                        # 3. Standardize Data
-                        normalized_obs = FareNormalizer.normalize_observation(raw_obs)
-                        
-                        # 4. Validate
-                        is_valid, error_msg = DataValidator.validate(normalized_obs)
-                        if not is_valid:
-                            print(f"Invalid record skipped: {error_msg}")
-                            invalid_count += 1
-                            continue
-                            
-                        # 5. Check Duplicates
-                        if deduplicator.is_duplicate(normalized_obs):
-                            duplicate_count += 1
-                            continue
-                            
-                        # 6. Insert into MySQL
-                        insert_query = """
-                            INSERT INTO airfare_observations (
-                                source, source_type, airline, flight_number, origin, destination,
-                                departure_date, departure_time, arrival_time, duration_minutes,
-                                stops, fare_class, base_fare, taxes, fees, total_fare, currency,
-                                availability, lead_time_days, booking_url, scraped_at
-                            ) VALUES (
-                                %(source)s, %(source_type)s, %(airline)s, %(flight_number)s, %(origin)s, %(destination)s,
-                                %(departure_date)s, %(departure_time)s, %(arrival_time)s, %(duration_minutes)s,
-                                %(stops)s, %(fare_class)s, %(base_fare)s, %(taxes)s, %(fees)s, %(total_fare)s, %(currency)s,
-                                %(availability)s, %(lead_time_days)s, %(booking_url)s, %(scraped_at)s
-                            )
-                        """
-                        cursor.execute(insert_query, normalized_obs)
-                        saved_count += 1
-                    
-                    db_conn.commit()
-                    
-                    print(f"Route {origin}-{dest}: Found {len(raw_observations)}, Saved {saved_count}, Duplicates {duplicate_count}, Invalid {invalid_count}")
-                    
-                    # Optional: Log to scrape_logs table here
-                    
-                except Exception as e:
-                    print(f"Error processing route {origin}-{dest} with {scraper.__class__.__name__}: {e}")
-                    db_conn.rollback()
+                # Process pipeline: Normalization -> Validation -> Deduplication
+                normalized_records = scraper.normalize(source_records)
+                valid_records, rejected = scraper.validate(normalized_records)
 
-        cursor.close()
-        db_conn.close()
-        print(f"--- Pipeline Finished at {datetime.now()} ---\n")
+                # Filter duplicates
+                to_insert = [rec for rec in valid_records if not self.deduplicator.is_duplicate(rec)]
+                
+                # Insert via transaction
+                inserted_count = self.repo.insert_fare_observations(to_insert)
+
+                duration = round((datetime.now() - source_start).total_seconds(), 2)
+                log_scrape_success(source_name, len(source_records), duration)
+                print(f"[{source_name}] Status: SUCCESS Records: {len(source_records)}")
+
+                total_collected += len(source_records)
+                total_validated += len(valid_records)
+                total_rejected += len(rejected)
+                total_inserted += inserted_count
+
+                self.repo.record_scrape_run(
+                    source=source_name,
+                    started_at=source_start.strftime("%Y-%m-%d %H:%M:%S"),
+                    completed_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    status="SUCCESS",
+                    records_found=len(source_records),
+                    records_inserted=inserted_count,
+                    records_rejected=len(rejected)
+                )
+
+            except SourceUnavailableError as e:
+                status = "UNAVAILABLE"
+                err_msg = str(e)
+                log_scrape_failure(source_name, err_msg)
+                print(f"[{source_name}] Status: UNAVAILABLE")
+                self.repo.record_scrape_run(
+                    source=source_name,
+                    started_at=source_start.strftime("%Y-%m-%d %H:%M:%S"),
+                    completed_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    status="UNAVAILABLE",
+                    records_found=0,
+                    records_inserted=0,
+                    records_rejected=0,
+                    error_message=err_msg
+                )
+            except Exception as e:
+                status = "FAILED"
+                err_msg = str(e)
+                log_scrape_failure(source_name, err_msg)
+                print(f"[{source_name}] Status: FAILED")
+                self.repo.record_scrape_run(
+                    source=source_name,
+                    started_at=source_start.strftime("%Y-%m-%d %H:%M:%S"),
+                    completed_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    status="FAILED",
+                    records_found=0,
+                    records_inserted=0,
+                    records_rejected=0,
+                    error_message=err_msg
+                )
+
+        print("----------------------------------------")
+        print(f"TOTAL RECORDS: {total_collected}")
+        print(f"Records validated: {total_validated}")
+        print(f"Records rejected: {total_rejected}")
+        print(f"Records inserted: {total_inserted}")
+        print("----------------------------------------")
+        print("Database insertion completed.")
+        print("Scraping cycle completed successfully.")
+        print(f"Next run in {self.interval_minutes} minutes.")
 
     def start(self):
-        print(f"Scheduler started. Running every {self.interval_minutes} minutes.")
-        # Run once immediately
-        self.run_pipeline()
-        
+        print(f"Starting scheduler...")
+        print(f"Scheduler started.")
+        # Execute immediate run
+        self.run_cycle()
+
         # Schedule subsequent runs
-        schedule.every(self.interval_minutes).minutes.do(self.run_pipeline)
-        
+        schedule.every(self.interval_minutes).minutes.do(self.run_cycle)
         while True:
             schedule.run_pending()
             time.sleep(1)
