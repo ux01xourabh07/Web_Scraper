@@ -11,12 +11,8 @@ def setup_logger(name, log_file, level=logging.INFO):
     
     formatter = logging.Formatter('%(asctime)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
     
-    handler = logging.FileHandler(log_file)        
+    handler = logging.FileHandler(log_file)
     handler.setFormatter(formatter)
-    
-    # Also log to console if needed, though spec emphasizes writing to log files
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
 
     logger = logging.getLogger(name)
     logger.setLevel(level)
@@ -24,7 +20,6 @@ def setup_logger(name, log_file, level=logging.INFO):
     # Prevent adding multiple handlers if logger already exists
     if not logger.handlers:
         logger.addHandler(handler)
-        logger.addHandler(console_handler)
 
     return logger
 
